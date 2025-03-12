@@ -1,7 +1,3 @@
-Here's your complete **`README.md`** file with all the necessary updates for seamless execution in both **local and Docker environments**.  
-
----
-
 ### **`README.md`**
 ```markdown
 # SEO Agent MVP
