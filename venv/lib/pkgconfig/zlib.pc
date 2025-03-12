@@ -1,0 +1,13 @@
+prefix=/Users/chitrajain/Documents/Code/seo-agent/venv
+exec_prefix=/Users/chitrajain/Documents/Code/seo-agent/venv
+libdir=/Users/chitrajain/Documents/Code/seo-agent/venv/lib
+sharedlibdir=/Users/chitrajain/Documents/Code/seo-agent/venv/lib
+includedir=/Users/chitrajain/Documents/Code/seo-agent/venv/include
+
+Name: zlib
+Description: zlib compression library
+Version: 1.2.13
+
+Requires:
+Libs: -L${libdir} -L${sharedlibdir} -lz
+Cflags: -I${includedir}
