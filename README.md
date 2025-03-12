@@ -1,5 +1,5 @@
 ### **`README.md`**
-```markdown
+
 # SEO Agent MVP
 
 ## Overview
@@ -53,7 +53,6 @@ pip install -r requirements.txt
 ---
 
 ### 3. Configure Environment Variables
-
 Create a `.env` file in the **project root** and add your OpenAI API key:
 ```ini
 OPENAI_API_KEY=your_openai_api_key_here
@@ -112,6 +111,7 @@ docker run --env-file .env -p 8501:8501 seo-agent
 ```python
 import openai
 import os
+
 client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 response = client.chat.completions.create(
     model="gpt-4",
@@ -119,5 +119,5 @@ response = client.chat.completions.create(
 )
 print(response.choices[0].message.content)
 ```
+```
 
----
