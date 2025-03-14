@@ -1,5 +1,9 @@
-streamlit
-openai>=1.0.0
-python-dotenv
-requests
-beautifulsoup4
+streamlit>=1.32.0
+openai>=1.12.0
+requests>=2.31.0
+beautifulsoup4>=4.12.3
+python-dotenv>=1.0.0
+firecrawl-py>=0.0.26
+urllib3>=1.26.18
+matplotlib
+seaborn
