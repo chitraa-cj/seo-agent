@@ -1,93 +1,138 @@
 import streamlit as st
-import openai
-import os
-import requests
-from bs4 import BeautifulSoup
-from dotenv import load_dotenv
+from crawlers import fetch_with_beautifulsoup, fetch_with_firecrawl
+from analysis import evaluate_result_for_openai
+from visualization import visualize_crawler_comparison
+from utils import load_environment
+import json
 
-if not os.getenv("DOCKER_RUNNING"):
-    load_dotenv()
+# Load environment variables
+api_key, firecrawl_api_key, client = load_environment()
 
-api_key = os.getenv("OPENAI_API_KEY")
+st.title("Web Crawler Performance Comparison")
+st.subheader("Evaluate BeautifulSoup vs Firecrawl for SEO data extraction")
 
-if api_key:
-    client = openai.OpenAI(api_key=api_key)
-else:
-    client = None
+# Sidebar settings
+st.sidebar.header("Settings")
+max_retries = st.sidebar.slider("Max Retry Attempts", 1, 5, 2)
+request_timeout = st.sidebar.slider("Request Timeout (seconds)", 10, 60, 30)
+use_proxy = st.sidebar.checkbox("Use Proxy Server")
 
-st.title("SEO AI Agent")
-st.subheader("Get an AI-generated On-Page SEO report for your website")
+website_url = st.text_input("Enter your website URL to compare crawlers:")
 
-niche = st.text_input("Enter your website's niche:")
-tagline = st.text_input("Enter your website's tagline:")
-website_url = st.text_input("Enter your website URL:")
-
-def fetch_website_content(url):
-    try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
-        
-        soup = BeautifulSoup(response.text, "html.parser")
-        
-        title = soup.title.string if soup.title else "No title found"
-        meta_description = (
-            soup.find("meta", attrs={"name": "description"})
-            or soup.find("meta", attrs={"property": "og:description"})
-        )
-        meta_description = meta_description["content"] if meta_description else "No meta description found"
-
-        headings = [h.get_text() for h in soup.find_all(["h1", "h2", "h3"])]
-        paragraphs = [p.get_text() for p in soup.find_all("p")]
-        content = " ".join(headings + paragraphs)[:3000]  # Limit text size
-
-        return {
-            "title": title,
-            "meta_description": meta_description,
-            "headings": headings[:5],  # Limit number of headings
-            "content": content
-        }
-
-    except Exception as e:
-        return {"error": f"Error fetching website content: {e}"}
-
-if st.button("Generate On-Page SEO Report"):
-    if not website_url.startswith("http"):
-        st.error("Please enter a valid URL starting with http or https")
+if st.button("Compare Crawlers"):
+    if not website_url:
+        st.error("Please enter a website URL")
     else:
-        website_data = fetch_website_content(website_url)
-        
-        if "error" in website_data:
-            st.error(website_data["error"])
-        elif client:
-            try:
-                prompt = (
-                    f"Analyze the On-Page SEO of a website with the following details:\n"
-                    f"Niche: {niche}\nTagline: {tagline}\n\n"
-                    f"Title: {website_data['title']}\n"
-                    f"Meta Description: {website_data['meta_description']}\n"
-                    f"Headings: {', '.join(website_data['headings'])}\n"
-                    f"Content Snippet: {website_data['content'][:1000]}\n\n"
-                    f"Provide a detailed On-Page SEO analysis including:\n"
-                    f"- Title tag optimization\n"
-                    f"- Meta description effectiveness\n"
-                    f"- Heading structure (H1, H2, H3 usage)\n"
-                    f"- Keyword density and relevance\n"
-                    f"- Internal linking suggestions."
-                )
+        with st.spinner("Comparing crawlers..."):
+            # Progress tracking
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            # Step 1: Fetch data with BeautifulSoup
+            status_text.text("Fetching data with BeautifulSoup...")
+            bs_result, bs_time = fetch_with_beautifulsoup(website_url, request_timeout)
+            progress_bar.progress(30)
+            
+            # Show BeautifulSoup results
+            st.subheader("BeautifulSoup Results")
+            if "error" in bs_result:
+                st.error(f"BeautifulSoup error: {bs_result['error']}")
+            else:
+                st.success(f"BeautifulSoup completed in {bs_time:.2f} seconds")
+                st.json({k: v for k, v in bs_result.items() if k != 'content'})
                 
-                response = client.chat.completions.create(
-                    model="gpt-4",
-                    messages=[
-                        {"role": "system", "content": "You are an advanced SEO expert."},
-                        {"role": "user", "content": prompt},
-                    ]
-                )
+                with st.expander("Content Preview"):
+                    st.text(bs_result.get('content', '')[:500])
+            
+            # Step 2: Fetch data with Firecrawl
+            status_text.text("Fetching data with Firecrawl...")
+            if not firecrawl_api_key:
+                st.warning("Firecrawl API key not found. Skipping Firecrawl test.")
+                fc_result = {"error": "Firecrawl API key not found"}
+                fc_time = 0
+            else:
+                fc_result, fc_time = fetch_with_firecrawl(website_url, firecrawl_api_key, max_retries, 
+                                                      request_timeout, use_proxy)
+            progress_bar.progress(60)
+            
+            # Show Firecrawl results
+            st.subheader("Firecrawl Results")
+            if "error" in fc_result:
+                st.error(f"Firecrawl error: {fc_result['error']}")
+            else:
+                st.success(f"Firecrawl completed in {fc_time:.2f} seconds")
+                st.json({k: v for k, v in fc_result.items() if k != 'content'})
+                
+                with st.expander("Content Preview"):
+                    st.text(fc_result.get('content', '')[:500])
+            
+            # Step 3: Evaluate and compare results
+            status_text.text("Evaluating crawler results...")
+            
+            if "error" not in bs_result or "error" not in fc_result:
+                bs_score, bs_quality = evaluate_result_for_openai(bs_result)
+                fc_score, fc_quality = evaluate_result_for_openai(fc_result)
+                
+                # Create visualization
+                fig, time_fig = visualize_crawler_comparison(bs_result, fc_result)
+                if fig:
+                    st.subheader("Data Extraction Comparison")
+                    st.pyplot(fig)
+                if time_fig:
+                    st.subheader("Performance Comparison")
+                    st.pyplot(time_fig)
+                
+                # Show evaluation scores
+                st.subheader("Crawler Evaluation")
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.metric("BeautifulSoup Quality Score", f"{bs_score}/110")
+                    with st.expander("BeautifulSoup Quality Details"):
+                        st.json(bs_quality)
+                
+                with col2:
+                    st.metric("Firecrawl Quality Score", f"{fc_score}/110")
+                    with st.expander("Firecrawl Quality Details"):
+                        st.json(fc_quality)
+                
+                # Final recommendation
+                st.subheader("Recommendation")
+                if bs_score > fc_score:
+                    st.info(f"BeautifulSoup performed better with a score of {bs_score}/110 compared to Firecrawl's {fc_score}/110.")
+                    if bs_time > fc_time:
+                        st.warning(f"However, BeautifulSoup was slower ({bs_time:.2f}s vs {fc_time:.2f}s).")
+                elif fc_score > bs_score:
+                    st.info(f"Firecrawl performed better with a score of {fc_score}/110 compared to BeautifulSoup's {bs_score}/110.")
+                    if fc_time > bs_time:
+                        st.warning(f"However, Firecrawl was slower ({fc_time:.2f}s vs {bs_time:.2f}s).")
+                else:
+                    if bs_time < fc_time:
+                        st.info(f"Both crawlers performed equally well with a score of {bs_score}/110, but BeautifulSoup was faster.")
+                    elif fc_time < bs_time:
+                        st.info(f"Both crawlers performed equally well with a score of {bs_score}/110, but Firecrawl was faster.")
+                    else:
+                        st.info(f"Both crawlers performed equally well with a score of {bs_score}/110 and similar timing.")
+            
+            progress_bar.progress(100)
+            status_text.text("Comparison complete!")
 
-                st.subheader("On-Page SEO Report:")
-                st.write(response.choices[0].message.content)
-
-            except Exception as e:
-                st.error(f"Error generating On-Page SEO report: {e}")
-        else:
-            st.error("API key not found. Make sure to set it in the .env file.")
+# Add helpful information in the sidebar
+with st.sidebar:
+    st.subheader("How to Use")
+    st.markdown("""
+    1. Enter a website URL above
+    2. Click "Compare Crawlers" to analyze
+    3. Review the performance metrics for each crawler
+    4. Use the recommendation to decide which crawler to use for your SEO analysis
+    """)
+    
+    st.subheader("Evaluation Metrics")
+    st.markdown("""
+    - **Title Quality**: How well the title is extracted
+    - **Meta Description**: Quality of meta description extraction
+    - **Headings**: Number and quality of headings
+    - **Content**: Amount and quality of content extracted
+    - **Additional Elements**: Links, images, and alt text
+    - **Performance**: Speed of extraction
+    """)
