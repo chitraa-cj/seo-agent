@@ -66,7 +66,7 @@ def fetch_with_beautifulsoup(url, request_timeout):
 
 @timer_decorator
 def fetch_with_firecrawl(url, firecrawl_api_key, max_retries, request_timeout, use_proxy):
-    """Fetch website data using Firecrawl"""
+    """Fetch website data using Firecrawl V1 API"""
     try:
         if not firecrawl_api_key:
             return {"error": "Firecrawl API key not found"}
@@ -75,7 +75,7 @@ def fetch_with_firecrawl(url, firecrawl_api_key, max_retries, request_timeout, u
         
         # Updated parameters for V1 API
         params = {
-            'formats': ['markdown', 'html', 'links'],  # Request multiple formats
+            'formats': ['markdown', 'html', 'links'],  # Request multiple formats as per V1 API
             'timeout': request_timeout * 1000,  # Convert to milliseconds
         }
 
@@ -89,25 +89,26 @@ def fetch_with_firecrawl(url, firecrawl_api_key, max_retries, request_timeout, u
                 # Using V1 API format
                 scrape_result = app.scrape_url(url, params=params)
                 
-                # Check for data in V1 API response structure
-                if (isinstance(scrape_result, dict) and 
-                    'data' in scrape_result and 
-                    'markdown' in scrape_result['data']):
+                # Since V1 SDK returns the data object directly (according to docs)
+                # we don't need to check for 'data' key
+                if scrape_result and isinstance(scrape_result, dict):
                     break
                     
                 time.sleep(2 ** attempt)
             except Exception as e:
+                print(f"Firecrawl attempt {attempt+1} failed: {str(e)}")
                 if attempt == max_retries - 1:
                     raise
                 time.sleep(2 ** attempt)
 
-        if not isinstance(scrape_result, dict) or 'data' not in scrape_result:
+        if not isinstance(scrape_result, dict):
             return {"error": "Firecrawl failed to retrieve content"}
 
-        data = scrape_result['data']
-        metadata = data.get('metadata', {})
-        markdown = data.get('markdown', '')
-        links = data.get('links', [])
+        # V1 API returns data object directly through the SDK
+        markdown = scrape_result.get('markdown', '')
+        links = scrape_result.get('links', [])
+        metadata = scrape_result.get('metadata', {})
+        html_content = scrape_result.get('html', '')
 
         # Extract headings from markdown
         headings = []
@@ -125,8 +126,8 @@ def fetch_with_firecrawl(url, firecrawl_api_key, max_retries, request_timeout, u
         # Extract image information from HTML if available
         image_count = 0
         images_with_alt = 0
-        if 'html' in data:
-            html_soup = BeautifulSoup(data['html'], 'html.parser')
+        if html_content:
+            html_soup = BeautifulSoup(html_content, 'html.parser')
             images = html_soup.find_all('img')
             image_count = len(images)
             images_with_alt = len([img for img in images if img.get('alt')])
