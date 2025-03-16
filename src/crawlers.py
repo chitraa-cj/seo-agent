@@ -1,15 +1,14 @@
-import time
-import re
 from bs4 import BeautifulSoup
 from firecrawl import FirecrawlApp
-from config import session, firecrawl_api_key
-from utils import timer_decorator
+import re
+import time
+from utils import timer_decorator, create_session
 
-# In analysis.py change:
-from config import client
+session = create_session()
 
 @timer_decorator
 def fetch_with_beautifulsoup(url, request_timeout):
+    """Fetch website data using BeautifulSoup"""
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
@@ -34,11 +33,23 @@ def fetch_with_beautifulsoup(url, request_timeout):
         headings = [h.get_text().strip() for h in soup.find_all(["h1", "h2", "h3"])]
         paragraphs = [p.get_text().strip() for p in soup.find_all("p")]
         
+        # Count words in content
         content = " ".join(headings + paragraphs)
         word_count = len(content.split())
         
-        links = [a['href'] for a in soup.find_all('a', href=True) if a['href'].startswith(('http://', 'https://'))]
-        images = [{'alt': img.get('alt', '')} for img in soup.find_all('img')]
+        # Extract links
+        links = []
+        for a in soup.find_all('a', href=True):
+            href = a['href']
+            if href.startswith(('http://', 'https://')):
+                links.append(href)
+        
+        # Extract image info
+        images = []
+        for img in soup.find_all('img'):
+            alt_text = img.get('alt', '')
+            if alt_text:
+                images.append({'alt': alt_text})
         
         return {
             "title": title,
@@ -54,24 +65,36 @@ def fetch_with_beautifulsoup(url, request_timeout):
         return {"error": f"BeautifulSoup error: {str(e)}"}
 
 @timer_decorator
-def fetch_with_firecrawl(url, request_timeout, max_retries, use_proxy):
+def fetch_with_firecrawl(url, firecrawl_api_key, max_retries, request_timeout, use_proxy):
+    """Fetch website data using Firecrawl"""
     try:
         if not firecrawl_api_key:
             return {"error": "Firecrawl API key not found"}
         
         app = FirecrawlApp(api_key=firecrawl_api_key)
+        
+        # Updated parameters for V1 API
         params = {
-            'formats': ['markdown', 'html', 'links'],
-            'timeout': request_timeout * 1000,
-            'proxy': 'basic' if use_proxy else None
+            'formats': ['markdown', 'html', 'links'],  # Request multiple formats
+            'timeout': request_timeout * 1000,  # Convert to milliseconds
         }
 
+        if use_proxy:
+            params['proxy'] = 'basic'
+
+        # Retry logic
         scrape_result = None
         for attempt in range(max_retries):
             try:
+                # Using V1 API format
                 scrape_result = app.scrape_url(url, params=params)
-                if scrape_result and 'data' in scrape_result and 'markdown' in scrape_result['data']:
+                
+                # Check for data in V1 API response structure
+                if (isinstance(scrape_result, dict) and 
+                    'data' in scrape_result and 
+                    'markdown' in scrape_result['data']):
                     break
+                    
                 time.sleep(2 ** attempt)
             except Exception as e:
                 if attempt == max_retries - 1:
@@ -84,19 +107,24 @@ def fetch_with_firecrawl(url, request_timeout, max_retries, use_proxy):
         data = scrape_result['data']
         metadata = data.get('metadata', {})
         markdown = data.get('markdown', '')
-        
+        links = data.get('links', [])
+
+        # Extract headings from markdown
         headings = []
         if markdown:
             for line in markdown.split('\n'):
                 if re.match(r'^#+\s', line):
-                    headings.append(re.sub(r'^#+\s*', '', line).strip())
+                    heading = re.sub(r'^#+\s*', '', line).strip()
+                    headings.append(heading)
                     if len(headings) >= 5:
                         break
         
+        # Count words in markdown content
         word_count = len(markdown.split()) if markdown else 0
+        
+        # Extract image information from HTML if available
         image_count = 0
         images_with_alt = 0
-        
         if 'html' in data:
             html_soup = BeautifulSoup(data['html'], 'html.parser')
             images = html_soup.find_all('img')
@@ -109,7 +137,7 @@ def fetch_with_firecrawl(url, request_timeout, max_retries, use_proxy):
             "headings": headings[:5],
             "content": markdown[:3000] if markdown else '',
             "word_count": word_count,
-            "link_count": len(data.get('links', [])),
+            "link_count": len(links) if links else 0,
             "image_count": image_count,
             "images_with_alt": images_with_alt
         }
